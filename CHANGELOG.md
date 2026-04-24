@@ -3,6 +3,12 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.2.4] - 2026-04-24
+
+### Notes
+- Actualización de metadatos: DOI de Zenodo añadido a CITATION.cff y README.md.
+- Sin cambios funcionales en la API de `ideam_dhime`.
+
 ## [0.2.3] - 2026-04-24
 
 ### Notes

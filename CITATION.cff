@@ -7,8 +7,9 @@ authors:
     given-names: "DAVID"
     email: "ing.daviddeleon@gmail.com"
     orcid: "https://orcid.org/0000-0002-1846-9750"
-version: 0.2.1
-date-released: "2026-04-22"
+version: 0.2.3
+date-released: "2026-04-24"
+doi: "10.5281/zenodo.19740803"
 url: "https://github.com/David-R-De-Leon-P/IDEAM_scrapping"
 license: GPL-3.0-or-later
 repository-code: "https://github.com/David-R-De-Leon-P/IDEAM_scrapping"

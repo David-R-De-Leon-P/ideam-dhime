@@ -2,6 +2,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19740803.svg)](https://doi.org/10.5281/zenodo.19740803)
 
 Cliente en **Python** para descargar series hidrometeorológicas desde el portal **DHIME** del [IDEAM](https://www.ideam.gov.co/) (Colombia). Automatiza el flujo en el navegador con **Selenium** (Chrome), extrae el ZIP y renombra el CSV resultante.
 
@@ -263,11 +264,12 @@ GitHub muestra un botón de cita si mantienes actualizado [`CITATION.cff`](CITAT
 
 ```bibtex
 @software{ideam_dhime,
-  author = {De Leon Perez, David},
-  title  = {ideam-dhime: cliente DHIME IDEAM},
-  url    = {https://github.com/David-R-De-Leon-P/IDEAM_scrapping},
-  version = {0.2.1},
-  year   = {2026},
+  author  = {De Leon Perez, David},
+  title   = {ideam-dhime: cliente DHIME IDEAM},
+  url     = {https://github.com/David-R-De-Leon-P/IDEAM_scrapping},
+  doi     = {10.5281/zenodo.19740803},
+  version = {0.2.3},
+  year    = {2026},
 }
 ```
 
