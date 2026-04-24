@@ -3,6 +3,21 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.2.3] - 2026-04-24
+
+### Notes
+- Maintenance release to establish Zenodo DOI archival via GitHub–Zenodo integration.
+- No functional API changes in `ideam_dhime`.
+
+## [0.2.2] - 2026-04-24
+
+### Changed
+- Maintenance release focused on publication workflow and archival interoperability (GitHub Releases + Zenodo DOI).
+
+### Notes
+- No functional API changes in `ideam_dhime`.
+- Intended to trigger Zenodo ingestion after repository integration.
+
 ## [0.2.1] - 2026-04-22
 
 ### Añadido
