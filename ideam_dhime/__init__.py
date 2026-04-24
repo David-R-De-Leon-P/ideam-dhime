@@ -16,7 +16,7 @@ from ideam_dhime.requests_model import StationRequest, coerce_request
 from ideam_dhime.scraper import download_dhime_data
 from ideam_dhime.session import DHIMESession
 
-__version__ = "0.2.1"
+__version__ = "0.2.4"
 
 __all__ = [
     "CATALOG_GENERATED_AT",
