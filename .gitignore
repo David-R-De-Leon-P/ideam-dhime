@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Entornos virtuales
+.venv/
+venv/
+ENV/
+.env
+.env.*
+
+# Artefactos de build / empaquetado
+*.egg-info/
+*.egg
+dist/
+build/
+pip-wheel-metadata/
+
+# Tests / coverage / type checkers
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Datos y copias locales
+datos_hidro/
+Backup/
+release/
+*.zip
+*.csv
+*.crdownload
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

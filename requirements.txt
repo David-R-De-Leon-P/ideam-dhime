@@ -1,0 +1,5 @@
+# Dependencias de ejecución del paquete ideam-dhime.
+# Para dependencias de desarrollo (tests, lint), usa:
+#   pip install -e .[dev]
+
+selenium>=4.10

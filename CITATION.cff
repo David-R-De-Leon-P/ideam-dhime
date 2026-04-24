@@ -1,0 +1,17 @@
+cff-version: "1.2.0"
+title: "ideam-dhime"
+message: "Si usas este software, por favor cítalo como se indica abajo."
+type: software
+authors:
+  - family-names: "DE LEON PEREZ"
+    given-names: "DAVID"
+    email: "ing.daviddeleon@gmail.com"
+    orcid: "https://orcid.org/0000-0002-1846-9750"
+version: 0.2.1
+date-released: "2026-04-22"
+url: "https://github.com/David-R-De-Leon-P/IDEAM_scrapping"
+license: GPL-3.0-or-later
+repository-code: "https://github.com/David-R-De-Leon-P/IDEAM_scrapping"
+abstract: >
+  Cliente en Python (Selenium) para descargar series desde el portal DHIME
+  del IDEAM (Colombia), con extracción y renombrado del CSV resultante.
