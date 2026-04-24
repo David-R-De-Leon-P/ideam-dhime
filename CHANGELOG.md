@@ -11,18 +11,18 @@ y [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [0.2.3] - 2026-04-24
 
-### Notes
-- Maintenance release to establish Zenodo DOI archival via GitHub–Zenodo integration.
-- No functional API changes in `ideam_dhime`.
+### Notas
+- Release de mantenimiento para establecer el archivado con DOI en Zenodo mediante la integración GitHub–Zenodo.
+- Sin cambios funcionales en la API de `ideam_dhime`.
 
 ## [0.2.2] - 2026-04-24
 
-### Changed
-- Maintenance release focused on publication workflow and archival interoperability (GitHub Releases + Zenodo DOI).
+### Cambiado
+- Release de mantenimiento enfocado en el flujo de publicación e interoperabilidad de archivado (GitHub Releases + DOI Zenodo).
 
-### Notes
-- No functional API changes in `ideam_dhime`.
-- Intended to trigger Zenodo ingestion after repository integration.
+### Notas
+- Sin cambios funcionales en la API de `ideam_dhime`.
+- Destinado a activar la ingesta de Zenodo tras la integración con el repositorio.
 
 ## [0.2.1] - 2026-04-22
 
