@@ -255,6 +255,7 @@ Issues y pull requests son bienvenidos. Si cambias XPaths o tiempos, indica en e
 
 - David De Leon Perez
 - ORCID: [0000-0002-1846-9750](https://orcid.org/0000-0002-1846-9750)
+- Proyecto mantenido por David De Leon Perez; la afiliación organizacional puede evolucionar en versiones futuras.
 
 ## Cómo citar
 
