@@ -16,9 +16,13 @@ def test_public_symbols_present():
         "DHIMESession",
         "DownloadResult",
         "DownloadTimeoutError",
+        "FREQUENCY_LIMITS",
+        "Frequency",
+        "LocationNotFoundError",
         "NavigationError",
         "NoDataInRangeError",
         "StationNotFoundError",
+        "StationMetadata",
         "StationRequest",
         "UnknownVariableIdError",
         "VARIABLES_IDEAM",
@@ -27,7 +31,13 @@ def test_public_symbols_present():
         "coerce_request",
         "download_dhime_data",
         "generate_catalog",
+        "infer_frequency_from_name",
+        "merge_station_csvs",
+        "regenerate_station_catalog",
+        "resolve_frequency",
+        "resolve_station_metadata",
         "resolve_variable",
+        "station_catalog_path",
     }
     assert expected.issubset(set(ideam_dhime.__all__))
     for name in expected:

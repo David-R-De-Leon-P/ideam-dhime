@@ -1,9 +1,11 @@
 ﻿# -*- coding: utf-8 -*-
-"""Utilidades para trocear rangos en ventanas de años."""
+"""Utilidades para trocear rangos en ventanas seguras para DHIME."""
 
 from __future__ import annotations
 
 from datetime import date, timedelta
+
+from ideam_dhime.frequencies import FREQUENCY_LIMITS, Frequency
 
 DATE_FMT = "%d/%m/%Y"
 
@@ -46,6 +48,41 @@ def split_windows(date_ini: str, date_fin: str, max_years: int = 25) -> list[tup
         windows.append((_format_ddmmyyyy(current_start), _format_ddmmyyyy(current_end)))
         current_start = current_end + timedelta(days=1)
     return windows
+
+
+def split_by_days(date_ini: str, date_fin: str, max_days: int) -> list[tuple[str, str]]:
+    """Divide [date_ini, date_fin] en ventanas de máximo ``max_days`` días."""
+    if max_days <= 0:
+        raise ValueError("max_days debe ser mayor que cero")
+    start = _parse_ddmmyyyy(date_ini)
+    end = _parse_ddmmyyyy(date_fin)
+    if start > end:
+        raise ValueError("date_ini no puede ser mayor que date_fin")
+
+    windows: list[tuple[str, str]] = []
+    current_start = start
+    while current_start <= end:
+        current_end = min(end, current_start + timedelta(days=max_days - 1))
+        windows.append((_format_ddmmyyyy(current_start), _format_ddmmyyyy(current_end)))
+        current_start = current_end + timedelta(days=1)
+    return windows
+
+
+def split_for_frequency(
+    date_ini: str,
+    date_fin: str,
+    frequency: Frequency,
+    *,
+    max_years: int | None = None,
+    max_days: int | None = None,
+) -> list[tuple[str, str]]:
+    """Divide un rango según los límites conservadores de la frecuencia."""
+    limit = FREQUENCY_LIMITS[frequency]
+    if limit.max_days is not None:
+        return split_by_days(date_ini, date_fin, max_days=max_days or limit.max_days)
+    if limit.max_years is None:
+        raise ValueError(f"No hay límite configurado para frequency={frequency!r}")
+    return split_windows(date_ini, date_fin, max_years=max_years or limit.max_years)
 
 
 def split_30y(date_ini: str, date_fin: str) -> list[tuple[str, str]]:

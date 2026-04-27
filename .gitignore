@@ -17,6 +17,7 @@ ENV/
 dist/
 build/
 pip-wheel-metadata/
+ideam_dhime-*/
 
 # Tests / coverage / type checkers
 .pytest_cache/
@@ -30,9 +31,21 @@ htmlcov/
 datos_hidro/
 Backup/
 release/
+CNE/
+docs/contexto_trabajo.md
+docs/contexto_general_roadmap.md
+docs/guia_publicacion.md
+docs/plan_documentacion_usuario_integral.md
+docs/plan_v030_restricciones_frecuencia.md
+docs/plan_v040_headless_server.md
+docs/plan_v050_empaquetado_usuario_final.md
+docs/guia_estaciones_calidad.xlsx
+control_sesion_v030.txt
+test_downloads/
 *.zip
 *.csv
 *.crdownload
+output/
 
 # IDE
 .idea/

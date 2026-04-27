@@ -9,8 +9,10 @@ import pytest
 
 from ideam_dhime import (
     CATALOG_GENERATED_AT,
+    Frequency,
     UnknownVariableIdError,
     VARIABLES_IDEAM,
+    resolve_frequency,
     resolve_variable,
 )
 
@@ -32,6 +34,23 @@ def test_resolve_variable_known_id():
     assert name == "Caudal medio diario"
 
 
+def test_resolve_frequency_known_id():
+    assert resolve_frequency(7) is Frequency.DAILY
+    assert resolve_frequency(69) is Frequency.TWO_MINUTES
+
+
+def test_catalog_entries_include_frequency():
+    category, name, frequency = VARIABLES_IDEAM[7]
+    assert category == "Caudal"
+    assert name == "Caudal medio diario"
+    assert frequency is Frequency.DAILY
+
+
 def test_resolve_variable_unknown_id_raises():
     with pytest.raises(UnknownVariableIdError):
         resolve_variable(10 ** 9)
+
+
+def test_resolve_frequency_unknown_id_raises():
+    with pytest.raises(UnknownVariableIdError):
+        resolve_frequency(10 ** 9)

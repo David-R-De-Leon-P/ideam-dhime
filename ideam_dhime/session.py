@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 from datetime import date
@@ -13,8 +14,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 
-from ideam_dhime.catalog import resolve_variable
-from ideam_dhime.chunking import split_windows
+from ideam_dhime.catalog import resolve_frequency, resolve_variable
+from ideam_dhime.chunking import split_for_frequency
 from ideam_dhime.constants import (
     DEFAULT_TIMEOUT,
     DHIME_URL,
@@ -30,11 +31,71 @@ from ideam_dhime.constants import (
 from ideam_dhime.download import extract_and_rename, wait_for_zip
 from ideam_dhime.driver import build_browser, set_browser_download_dir
 from ideam_dhime.exceptions import DownloadTimeoutError, NavigationError, NoDataInRangeError
+from ideam_dhime.frequencies import Frequency
 from ideam_dhime.navigation import safe_click
 from ideam_dhime.requests_model import StationRequest
 from ideam_dhime.station import select_station_kendo
 
 logger = logging.getLogger("ideam_dhime")
+
+CLEANUP_FAILED_PREFIX = "cleanup_failed_dirs"
+
+
+def cleanup_pending_file_for(download_path: str | Path, pid: int | None = None) -> Path:
+    """Archivo de pendientes aislado por proceso para evitar escrituras compartidas."""
+    process_id = os.getpid() if pid is None else pid
+    return Path(download_path).absolute() / f"{CLEANUP_FAILED_PREFIX}_{process_id}.txt"
+
+
+def sweep_failed_cleanup_dirs(download_path: str | Path) -> set[Path]:
+    """
+    Barre todos los archivos de pendientes de una carpeta de descarga.
+
+    Pensado para ejecutarse desde el proceso padre al terminar workers paralelos.
+    Devuelve las carpetas que siguen sin poder eliminarse.
+    """
+    base = Path(download_path).absolute()
+    pending_files = sorted(base.glob(f"{CLEANUP_FAILED_PREFIX}*.txt"))
+    pending_dirs: set[Path] = set()
+
+    for pending_file in pending_files:
+        try:
+            for line in pending_file.read_text(encoding="utf-8").splitlines():
+                value = line.strip()
+                if value:
+                    pending_dirs.add(Path(value))
+        except Exception:
+            logger.warning("No se pudo leer archivo de pendientes: %s", pending_file, exc_info=True)
+
+    still_pending = {path for path in pending_dirs if not DHIMESession._cleanup_temp_dir(path)}
+
+    for pending_file in pending_files:
+        try:
+            pending_file.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.warning("No se pudo borrar archivo de pendientes: %s", pending_file, exc_info=True)
+
+    if still_pending:
+        unresolved_file = base / f"{CLEANUP_FAILED_PREFIX}_pending.txt"
+        try:
+            unresolved_file.write_text(
+                "\n".join(str(path) for path in sorted(still_pending, key=str)) + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.warning(
+                "No se pudo escribir archivo central de pendientes: %s",
+                unresolved_file,
+                exc_info=True,
+            )
+    return still_pending
+
+
+def _default_date_fin() -> str:
+    today = date.today()
+    return f"{today.day:02d}/{today.month:02d}/{today.year:04d}"
 
 
 class DHIMESession:
@@ -46,7 +107,7 @@ class DHIMESession:
         self._ctx = None
         self.browser = None
         self.wait = None
-        self._cleanup_failed_file = self.download_path / "cleanup_failed_dirs.txt"
+        self._cleanup_failed_file = cleanup_pending_file_for(self.download_path)
         self._cleanup_failed_dirs: set[Path] = set()
 
     def __enter__(self) -> "DHIMESession":
@@ -107,6 +168,7 @@ class DHIMESession:
         variable_code: str,
     ) -> tuple[str, str]:
         assert self.browser is not None and self.wait is not None
+        self._dismiss_open_dijit_dialogs()
 
         date_input_ini = self.wait.until(EC.presence_of_element_located((By.ID, "datepicker")))
         date_input_ini.click()
@@ -160,8 +222,19 @@ class DHIMESession:
         safe_click(self.browser, self.wait, XPATH_FILTER_BUTTON, "Clic en FILTRAR")
         time.sleep(5.0)
 
+        # Si el portal abrió un dialog de "no hay información" tras el FILTRAR,
+        # cerrarlo antes de revisar la tabla para no dejar el overlay abierto.
+        no_data_after_filter = self._close_no_data_dialog_if_present()
+        if no_data_after_filter:
+            raise NoDataInRangeError(
+                f"SIN_DATOS_EN_RANGO: estación {req.station_code} "
+                f"{date_ini}->{date_fin} (dialog sin datos tras FILTRAR)"
+            )
+
         rango_real = self._leer_rango_real_en_tabla(req.station_code)
         if rango_real is None:
+            # Último intento: cerrar cualquier dialog que pudiera haberse abierto tarde
+            self._dismiss_open_dijit_dialogs()
             raise NoDataInRangeError(
                 f"SIN_DATOS_EN_RANGO: estación {req.station_code} "
                 f"{date_ini}->{date_fin} (sin fila en tabla de resultados)"
@@ -339,7 +412,60 @@ class DHIMESession:
                 exc_info=True,
             )
 
+    def _dismiss_open_dijit_dialogs(self) -> None:
+        """
+        Cierra cualquier dijitDialog visible antes de interactuar con el formulario.
+
+        Cubre dos tipos:
+        - Dialogs de "no hay información" (detectados por texto).
+        - Dialogs de confirmación de descarga (detectados por underlay visible).
+
+        Intenta primero clic en «Aceptar»; si falla, elimina el underlay vía JS.
+        """
+        assert self.browser is not None
+
+        # 1) Cerrar dialogs de "no hay información" explícitamente por texto
+        self._close_no_data_dialog_if_present()
+
+        # 2) Buscar cualquier underlay dijit todavía visible
+        underlay_xpath = (
+            "//div[contains(@class,'dijitDialogUnderlay')"
+            " and not(contains(@style,'display: none'))"
+            " and not(contains(@style,'display:none'))]"
+        )
+        underlays = self.browser.find_elements(By.XPATH, underlay_xpath)
+        if not underlays:
+            return
+
+        logger.debug("Detectado dijitDialog abierto; intentando cerrarlo.")
+        accept_xpath = (
+            "//div[contains(@class,'dijitDialog')"
+            " and not(contains(@style,'display: none'))"
+            " and not(contains(@style,'display:none'))]"
+            "//*[self::span or self::button][normalize-space()='Aceptar']"
+            "|//div[contains(@class,'dijitDialog')"
+            " and not(contains(@style,'display: none'))"
+            " and not(contains(@style,'display:none'))]"
+            "//*[contains(@class,'dijitDialogCloseIcon')]"
+        )
+        btns = self.browser.find_elements(By.XPATH, accept_xpath)
+        for btn in btns:
+            try:
+                self.browser.execute_script("arguments[0].click();", btn)
+                time.sleep(0.5)
+                logger.debug("dijitDialog cerrado vía clic en botón.")
+                return
+            except Exception:
+                pass
+
+        # Último recurso: eliminar underlay directamente del DOM
+        self.browser.execute_script(
+            "document.querySelectorAll('.dijitDialogUnderlay').forEach(e => e.remove());"
+        )
+        logger.debug("dijitDialog underlay eliminado vía JavaScript.")
+
     def _limpiar_y_volver_a_consultar(self) -> None:
+        self._dismiss_open_dijit_dialogs()
         self._switch_tab("Consultar")
         self._click_limpiar()
         time.sleep(1.0)
@@ -458,44 +584,61 @@ class DHIMESession:
         *,
         parameter: str | None = None,
         variable_code: str | None = None,
-        max_years: int = 25,
+        max_years: int | None = None,
+        min_date: str | None = None,
+        max_days: int | None = None,
     ) -> list[Path]:
-        """Descarga una estación, con chunking automático (25 años por defecto)."""
+        """Descarga una estación, con chunking automático por frecuencia."""
+        frequency = Frequency.DAILY
         if parameter is None or variable_code is None:
             parameter, variable_code = resolve_variable(req.variable_id)
+            frequency = resolve_frequency(req.variable_id)
         logger.info("Descargando estación %s (%s)", req.station_code, variable_code)
+        requested_ini = req.date_ini or "01/01/1900"
+        effective_min = req.min_date or min_date
+        if effective_min:
+            requested_ini = self._fmt_ddmmyyyy(
+                max(self._parse_date_any(requested_ini), self._parse_date_any(effective_min))
+            )
+        requested_fin = req.date_fin or _default_date_fin()
 
         # Preflight con rango solicitado completo para obtener FechaIni/FechaFin reales
         # del portal y ajustar la descarga al solape real disponible.
         self._switch_tab("Consultar")
         real_ini, real_fin = self._aplicar_consulta(
             req,
-            req.date_ini,
-            req.date_fin,
+            requested_ini,
+            requested_fin,
             parameter,
             variable_code,
         )
         self._limpiar_y_volver_a_consultar()
 
-        req_ini_dt = self._parse_date_any(req.date_ini)
-        req_fin_dt = self._parse_date_any(req.date_fin)
+        req_ini_dt = self._parse_date_any(requested_ini)
+        req_fin_dt = self._parse_date_any(requested_fin)
         real_ini_dt = self._parse_date_any(real_ini)
         real_fin_dt = self._parse_date_any(real_fin)
-        lim_1970 = date(1970, 1, 1)
         eff_ini_dt = max(req_ini_dt, real_ini_dt)
-        eff_ini_dt = max(eff_ini_dt, lim_1970)
         eff_fin_dt = min(req_fin_dt, real_fin_dt)
         if eff_ini_dt > eff_fin_dt:
             raise NoDataInRangeError(
                 f"SIN_SOLAPE: estación {req.station_code} "
-                f"solicitado={req.date_ini}->{req.date_fin} "
+                f"solicitado={requested_ini}->{requested_fin} "
                 f"real={real_ini}->{real_fin}"
             )
         eff_ini = self._fmt_ddmmyyyy(eff_ini_dt)
         eff_fin = self._fmt_ddmmyyyy(eff_fin_dt)
 
         outputs: list[Path] = []
-        for win_ini, win_fin in split_windows(eff_ini, eff_fin, max_years=max_years):
+        effective_max_years = max_years if max_years is not None else req.max_years
+        effective_max_days = max_days if max_days is not None else req.max_days
+        for win_ini, win_fin in split_for_frequency(
+            eff_ini,
+            eff_fin,
+            frequency,
+            max_years=effective_max_years,
+            max_days=effective_max_days,
+        ):
             self._switch_tab("Consultar")
             self._aplicar_consulta(req, win_ini, win_fin, parameter, variable_code)
             output = self._ir_a_descargar_y_descargar(

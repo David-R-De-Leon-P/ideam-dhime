@@ -38,7 +38,9 @@ XPATH_ADD_TO_QUERY: Final[str] = "//div[@id='first']/div[6]/div"
 XPATH_DOWNLOAD_BUTTON: Final[str] = "//div[@id='second']/div/div[4]/div"
 
 JS_REMOVE_OVERLAYS: Final[str] = """
-    document.querySelectorAll('.k-loading-mask, .jimu-overlay').forEach(e => e.remove());
+    document.querySelectorAll(
+        '.k-loading-mask, .jimu-overlay, .dijitDialogUnderlay'
+    ).forEach(e => e.remove());
 """
 
 JS_BODY_CLICK: Final[str] = "document.body.click();"
