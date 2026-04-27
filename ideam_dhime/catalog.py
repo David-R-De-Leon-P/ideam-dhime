@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Catálogo indexado IDEAM incluido en el paquete: ID -> (categoría, nombre de variable).
+Catálogo indexado IDEAM incluido en el paquete:
+ID -> (categoría, nombre de variable, frecuencia).
 
 La categoría es el texto del desplegable de parámetros; el nombre de variable
 es el de la tabla ``DatosBuscarVariables`` (y se usa como ``variable_code`` en
@@ -13,11 +14,12 @@ from __future__ import annotations
 from typing import Final
 
 from ideam_dhime.exceptions import UnknownVariableIdError
+from ideam_dhime.frequencies import Frequency, infer_frequency_from_name
 
 # Fecha (ISO 8601) en que se fijó este snapshot para publicación del paquete.
 CATALOG_GENERATED_AT: Final[str] = "2026-04-21"
 
-VARIABLES_IDEAM: dict[int, tuple[str, str]] = {
+_VARIABLES_IDEAM_BASE: dict[int, tuple[str, str]] = {
     1: ('Brillo solar', 'Brillo solar de 500 a 1800'),
     2: ('Brillo solar', 'Brillo solar total diario'),
     3: ('Brillo solar', 'Brillo solar total mensual'),
@@ -181,6 +183,11 @@ VARIABLES_IDEAM: dict[int, tuple[str, str]] = {
     161: ('Velocidad del viento', 'Velocidad vectorial 10 minutal del viento media anual'),
 }
 
+VARIABLES_IDEAM: dict[int, tuple[str, str, Frequency]] = {
+    variable_id: (categoria, parametro, infer_frequency_from_name(parametro))
+    for variable_id, (categoria, parametro) in _VARIABLES_IDEAM_BASE.items()
+}
+
 
 def resolve_variable(variable_id: int) -> tuple[str, str]:
     """
@@ -190,9 +197,20 @@ def resolve_variable(variable_id: int) -> tuple[str, str]:
     variable tal como lo usa el portal en el ``onclick`` del input.
     """
     try:
-        categoria, parametro = VARIABLES_IDEAM[variable_id]
+        categoria, parametro, _frequency = VARIABLES_IDEAM[variable_id]
     except KeyError as exc:
         raise UnknownVariableIdError(
             f"variable_id={variable_id} no existe en el catálogo."
         ) from exc
     return categoria, parametro
+
+
+def resolve_frequency(variable_id: int) -> Frequency:
+    """Resuelve un ID del catálogo a la frecuencia inferida para chunking."""
+    try:
+        _categoria, _parametro, frequency = VARIABLES_IDEAM[variable_id]
+    except KeyError as exc:
+        raise UnknownVariableIdError(
+            f"variable_id={variable_id} no existe en el catálogo."
+        ) from exc
+    return frequency

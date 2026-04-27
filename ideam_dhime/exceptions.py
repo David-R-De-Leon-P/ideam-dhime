@@ -10,6 +10,10 @@ class StationNotFoundError(DHIMEError):
     """No se encontró el código de estación en el desplegable Kendo."""
 
 
+class LocationNotFoundError(DHIMEError):
+    """No se encontró o validó una ubicación en el catálogo maestro."""
+
+
 class DownloadTimeoutError(DHIMEError):
     """Tiempo de espera agotado esperando el archivo ZIP."""
 

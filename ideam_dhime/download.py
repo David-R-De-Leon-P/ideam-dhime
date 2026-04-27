@@ -15,6 +15,31 @@ from ideam_dhime.exceptions import DHIMEError, DownloadTimeoutError, NoDataInRan
 logger = logging.getLogger("ideam_dhime")
 
 
+def _safe_unlink(path: Path, retries: int = 6, delay_s: float = 0.4) -> None:
+    """
+    Elimina archivos con reintentos para tolerar bloqueos transitorios en Windows/Dropbox.
+    """
+    last_exc: Exception | None = None
+    for _ in range(retries):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(delay_s)
+        except OSError as exc:
+            # WinError 32: archivo en uso por otro proceso.
+            if getattr(exc, "winerror", None) == 32:
+                last_exc = exc
+                time.sleep(delay_s)
+                continue
+            raise
+    if last_exc is not None:
+        raise DHIMEError(f"No se pudo eliminar archivo bloqueado: {path}") from last_exc
+
+
 def wait_for_zip(
     target_dir: Path,
     timeout: int = DOWNLOAD_TIMEOUT,
@@ -84,10 +109,10 @@ def extract_and_rename(
     final_file_path = target_dir / final_file_name
 
     if final_file_path.exists():
-        final_file_path.unlink()
+        _safe_unlink(final_file_path)
 
     csv_extraido.replace(final_file_path)
-    zip_path.unlink()
+    _safe_unlink(zip_path)
 
     logger.info("ÉXITO TOTAL: Archivo %s guardado en %s", final_file_name, target_dir)
     return final_file_path

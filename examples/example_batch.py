@@ -1,22 +1,69 @@
 # -*- coding: utf-8 -*-
-"""Ejemplo configurable: 1 estación o 4 estaciones, en serie o paralelo."""
+"""
+Ejemplo de descarga en lote con ideam-dhime (v0.3.0+).
+
+Muestra dos enfoques:
+  A) Entrada mínima: solo station_code + variable_id.
+     El catálogo embebido resuelve automáticamente departamento y municipio.
+  B) Entrada completa: station_code + variable_id + fechas + ubicación explícita.
+     Útil cuando se quiere acotar el periodo o sobreescribir la ubicación.
+
+También ilustra el modo paralelo (parallel=True) con múltiples workers.
+
+Ejecutar desde la raíz del proyecto:
+    python examples/example_batch.py
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 from ideam_dhime import CATALOG_GENERATED_AT, StationRequest, batch_download
 
-DOWNLOAD_DIR = "./datos_hidro"
-VARIABLE_ID = 7
+# ── Configuración ─────────────────────────────────────────────────────────────
 
-# Cambia estas dos banderas antes de dar "play":
-# - EXAMPLE_SET: "one" o "four"
-# - EXECUTION_MODE: "serial" o "parallel"
-EXAMPLE_SET = "four"
-EXECUTION_MODE = "parallel"
+DOWNLOAD_DIR = Path("./datos_hidro")
+VARIABLE_ID = 7  # Caudal medio diario
+
+# Cambia estas dos banderas antes de ejecutar:
+#   EXAMPLE_SET   → "minimal"   entrada mínima, 10 estaciones del Huila
+#                 → "full"      entrada completa, 4 estaciones con fechas
+#   PARALLEL      → True        un proceso de Chrome por worker
+#                 → False       una sola sesión (recomendado para pruebas rápidas)
+EXAMPLE_SET = "minimal"
+PARALLEL = True
 WORKERS = 2
 
-# Nota: la fecha "01/01/202" que pasaste parece typo; se ajusta a 01/01/2022.
-REQUESTS_FOUR = [
+
+# ── Enfoque A: entrada mínima (station_code + variable_id) ───────────────────
+# El catálogo embebido resuelve departamento y municipio automáticamente.
+# No se necesita conocer ni indicar la ubicación.
+
+REQUESTS_MINIMAL = [
+    {"download_path": str(DOWNLOAD_DIR), "station_code": code, "variable_id": VARIABLE_ID}
+    for code in [
+        "21017020",  # SAN AGUSTIN
+        "21017030",  # CASCADA SIMON BOLIVAR - AUT
+        "21017040",  # SALADO BLANCO
+        "21017050",  # PITALITO 2
+        "21017060",  # MAGDALENA LA
+        "21027010",  # PERICONGO
+        "21037010",  # PUENTE GARCES
+        "21037020",  # SAN MARCOS - AUT
+        "21037030",  # LIBANO EL
+        "21037080",  # GUACHARO EL
+    ]
+]
+
+
+# ── Enfoque B: entrada completa (con fechas y ubicación explícita) ────────────
+# Útil para acotar el periodo o cuando se quiere sobreescribir la ubicación
+# del catálogo por algún motivo puntual.
+
+REQUESTS_FULL = [
     StationRequest(
-        download_path=DOWNLOAD_DIR,
+        download_path=str(DOWNLOAD_DIR),
         date_ini="13/02/1987",
         date_fin="30/11/2025",
         department="Bogotá",
@@ -25,7 +72,7 @@ REQUESTS_FOUR = [
         variable_id=VARIABLE_ID,
     ),
     StationRequest(
-        download_path=DOWNLOAD_DIR,
+        download_path=str(DOWNLOAD_DIR),
         date_ini="22/02/2006",
         date_fin="31/12/2025",
         department="Huila",
@@ -34,7 +81,7 @@ REQUESTS_FOUR = [
         variable_id=VARIABLE_ID,
     ),
     StationRequest(
-        download_path=DOWNLOAD_DIR,
+        download_path=str(DOWNLOAD_DIR),
         date_ini="01/01/2022",
         date_fin="31/12/2023",
         department="Huila",
@@ -43,7 +90,7 @@ REQUESTS_FOUR = [
         variable_id=VARIABLE_ID,
     ),
     StationRequest(
-        download_path=DOWNLOAD_DIR,
+        download_path=str(DOWNLOAD_DIR),
         date_ini="22/02/2006",
         date_fin="31/12/2025",
         department="Huila",
@@ -53,41 +100,48 @@ REQUESTS_FOUR = [
     ),
 ]
 
-REQUESTS_ONE = [REQUESTS_FOUR[2]]
 
+# ── Ejecución ─────────────────────────────────────────────────────────────────
 
-def run_example() -> None:
-    print(f"Catálogo incluido en el paquete (snapshot): {CATALOG_GENERATED_AT}")
-    selected = REQUESTS_ONE if EXAMPLE_SET == "one" else REQUESTS_FOUR
-    parallel = EXECUTION_MODE == "parallel"
+def run_example() -> int:
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"\nCatálogo embebido generado en: {CATALOG_GENERATED_AT}")
 
+    selected = REQUESTS_MINIMAL if EXAMPLE_SET == "minimal" else REQUESTS_FULL
+    mode = "paralelo" if PARALLEL else "serie"
     print(
-        f"Ejecutando ejemplo='{EXAMPLE_SET}' modo='{EXECUTION_MODE}' "
-        f"workers={WORKERS if parallel else 1} estaciones={len(selected)}"
+        f"Ejecutando conjunto='{EXAMPLE_SET}' modo='{mode}' "
+        f"workers={WORKERS if PARALLEL else 1} estaciones={len(selected)}\n"
     )
 
     results = batch_download(
         requests=selected,
+        download_path=DOWNLOAD_DIR,
         time_wait=25,
-        max_years=25,
-        parallel=parallel,
+        min_date="01/01/1970",  # Piso opcional para estudios (ej. series desde 1970)
+        merge_chunks=True,   # fusiona los chunks por estación en un solo CSV
+        keep_chunks=False,   # elimina los chunks intermedios
+        parallel=PARALLEL,
         workers=WORKERS,
     )
 
-    print("\nResumen")
-    ok = 0
-    err = 0
-    for result in results:
-        code = result.request.station_code
-        if result.status == "OK":
-            ok += 1
-            print(f"OK {code}: {len(result.csv_paths)} archivo(s)")
-        else:
-            err += 1
-            print(f"ERROR {code}: {result.message}")
-    print(f"Total OK: {ok}")
-    print(f"Total ERROR: {err}")
+    ok = [r for r in results if r.status == "OK"]
+    err = [r for r in results if r.status != "OK"]
+
+    print("=" * 60)
+    print(f"  Completadas: {len(ok)} / {len(results)}")
+    print("=" * 60)
+    for r in ok:
+        csv_info = str(r.csv_final or (r.csv_paths[0] if r.csv_paths else "—"))
+        print(f"  OK   {r.request.station_code}  → {Path(csv_info).name}")
+    if err:
+        print()
+        for r in err:
+            print(f"  ERR  {r.request.station_code}  {r.message}")
+    print("=" * 60 + "\n")
+
+    return 0 if not err else 1
 
 
 if __name__ == "__main__":
-    run_example()
+    sys.exit(run_example())

@@ -6,13 +6,42 @@ from __future__ import annotations
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Iterable
 
-from ideam_dhime.chunking import split_windows
+from ideam_dhime.catalog import resolve_frequency
+from ideam_dhime.chunking import split_for_frequency
 from ideam_dhime.constants import DEFAULT_TIMEOUT
+from ideam_dhime.csv_merge import merge_station_csvs
 from ideam_dhime.requests_model import StationRequest, coerce_request
-from ideam_dhime.session import DHIMESession
+from ideam_dhime.session import DHIMESession, sweep_failed_cleanup_dirs
+
+
+def _default_date_fin() -> str:
+    today = date.today()
+    return f"{today.day:02d}/{today.month:02d}/{today.year:04d}"
+
+
+def _parse_ddmmyyyy(value: str) -> date:
+    dd, mm, yyyy = (value or "").strip().split("/")
+    return date(int(yyyy), int(mm), int(dd))
+
+
+def _fmt_ddmmyyyy(value: date) -> str:
+    return f"{value.day:02d}/{value.month:02d}/{value.year:04d}"
+
+
+def _request_range(req: StationRequest, min_date: str | None = None) -> tuple[str, str]:
+    req_ini = req.date_ini or "01/01/1900"
+    req_fin = req.date_fin or _default_date_fin()
+    effective_min = req.min_date or min_date
+    if effective_min:
+        req_ini_dt = _parse_ddmmyyyy(req_ini)
+        min_dt = _parse_ddmmyyyy(effective_min)
+        if min_dt > req_ini_dt:
+            req_ini = _fmt_ddmmyyyy(min_dt)
+    return req_ini, req_fin
 
 
 @dataclass(frozen=True)
@@ -22,6 +51,7 @@ class DownloadResult:
     windows: list[tuple[str, str]]
     status: str
     message: str
+    csv_final: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +63,8 @@ class ChunkJob:
     department: str
     municipality: str
     download_path: str
+    max_years: int | None = None
+    max_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -57,8 +89,10 @@ def _chunk_key(job: ChunkJob) -> tuple[str, int, str, str, str, str, str]:
 
 def _expand_to_chunks(
     requests: list[StationRequest],
-    max_years: int,
+    max_years: int | None,
     base_path: Path | None,
+    min_date: str | None = None,
+    max_days: int | None = None,
 ) -> tuple[list[ChunkJob], list[list[tuple[str, int, str, str, str, str, str]]]]:
     seen: set[tuple[str, int, str, str, str, str, str]] = set()
     jobs: list[ChunkJob] = []
@@ -67,7 +101,17 @@ def _expand_to_chunks(
     for req in requests:
         target_path = str((base_path or Path(req.download_path)).absolute())
         keys_for_request: list[tuple[str, int, str, str, str, str, str]] = []
-        windows = split_windows(req.date_ini, req.date_fin, max_years=max_years)
+        frequency = resolve_frequency(req.variable_id)
+        effective_max_years = req.max_years if req.max_years is not None else max_years
+        effective_max_days = req.max_days if req.max_days is not None else max_days
+        date_ini, date_fin = _request_range(req, min_date=min_date)
+        windows = split_for_frequency(
+            date_ini,
+            date_fin,
+            frequency,
+            max_years=effective_max_years,
+            max_days=effective_max_days,
+        )
         for win_ini, win_fin in windows:
             job = ChunkJob(
                 station_code=req.station_code,
@@ -77,6 +121,8 @@ def _expand_to_chunks(
                 department=req.department,
                 municipality=req.municipality,
                 download_path=target_path,
+                max_years=effective_max_years,
+                max_days=effective_max_days,
             )
             key = _chunk_key(job)
             keys_for_request.append(key)
@@ -98,7 +144,9 @@ def _partition(items: list[ChunkJob], workers: int) -> list[list[ChunkJob]]:
 def _run_chunks_partition(
     partition: list[ChunkJob],
     time_wait: int,
-    max_years: int,
+    max_years: int | None,
+    min_date: str | None = None,
+    max_days: int | None = None,
 ) -> list[ChunkExecution]:
     results: list[ChunkExecution] = []
     if not partition:
@@ -153,12 +201,20 @@ def _run_chunks_partition(
                     municipality=job.municipality,
                     station_code=job.station_code,
                     variable_id=job.variable_id,
+                    max_years=job.max_years,
+                    max_days=job.max_days,
+                    min_date=min_date,
                 )
                 key = _chunk_key(job)
 
                 def _try_download_once() -> list[Path]:
                     assert session is not None
-                    return session.download_one(req, max_years=max_years)
+                    return session.download_one(
+                        req,
+                        max_years=job.max_years,
+                        max_days=job.max_days,
+                        min_date=min_date,
+                    )
 
                 try:
                     csv_paths = _try_download_once()
@@ -260,14 +316,36 @@ def _extract_window_from_key(key: tuple[str, int, str, str, str, str, str]) -> t
     return (key[2], key[3])
 
 
+def _final_csv_path(request: StationRequest, min_date: str | None = None) -> Path:
+    date_ini, date_fin = _request_range(request, min_date=min_date)
+    clean_ini = date_ini.replace("/", "")
+    clean_fin = date_fin.replace("/", "")
+    filename = f"{request.station_code}-{request.variable_id}-{clean_ini}-{clean_fin}-final.csv"
+    return Path(request.download_path) / filename
+
+
+def _is_no_data_message(message: str) -> bool:
+    upper = (message or "").upper()
+    markers = (
+        "SIN_DATOS_EN_RANGO",
+        "SIN_SOLAPE",
+    )
+    return any(marker in upper for marker in markers)
+
+
 def _collect_request_result(
     request: StationRequest,
     keys: Iterable[tuple[str, int, str, str, str, str, str]],
     executed: dict[tuple[str, int, str, str, str, str, str], ChunkExecution],
+    *,
+    min_date: str | None,
+    merge_chunks: bool,
+    keep_chunks: bool,
 ) -> DownloadResult:
     csv_paths: list[Path] = []
     windows: list[tuple[str, str]] = []
     errors: list[str] = []
+    skipped_no_data: list[str] = []
 
     for key in keys:
         windows.append(_extract_window_from_key(key))
@@ -276,17 +354,62 @@ def _collect_request_result(
             errors.append(f"Sin resultado para ventana {key[2]}-{key[3]}")
             continue
         if item.status != "OK" or not item.csv_path:
-            errors.append(f"{key[2]}-{key[3]}: {item.message}")
+            detail = f"{key[2]}-{key[3]}: {item.message}"
+            if _is_no_data_message(item.message):
+                skipped_no_data.append(detail)
+            else:
+                errors.append(detail)
             continue
         csv_paths.append(Path(item.csv_path))
 
+    csv_final: Path | None = None
+    if merge_chunks and csv_paths:
+        csv_final = merge_station_csvs(
+            csv_paths,
+            _final_csv_path(request, min_date=min_date),
+            keep_chunks=keep_chunks,
+        )
+        if not keep_chunks:
+            csv_paths = [csv_final]
+
     if errors:
+        msg = " | ".join(errors)
+        if skipped_no_data:
+            msg = (
+                f"{msg} | "
+                f"Ventanas sin datos omitidas: {len(skipped_no_data)}"
+            )
         return DownloadResult(
             request=request,
             csv_paths=csv_paths,
             windows=windows,
             status="ERROR",
-            message=" | ".join(errors),
+            message=msg,
+            csv_final=csv_final,
+        )
+
+    if not csv_paths:
+        no_data_msg = " | ".join(skipped_no_data) if skipped_no_data else "Sin resultados"
+        return DownloadResult(
+            request=request,
+            csv_paths=[],
+            windows=windows,
+            status="ERROR",
+            message=f"No hay datos para el periodo solicitado. {no_data_msg}",
+            csv_final=None,
+        )
+
+    if skipped_no_data:
+        return DownloadResult(
+            request=request,
+            csv_paths=csv_paths,
+            windows=windows,
+            status="OK",
+            message=(
+                "Descarga completada parcialmente: "
+                f"{len(skipped_no_data)} ventana(s) sin datos fueron omitidas"
+            ),
+            csv_final=csv_final,
         )
 
     return DownloadResult(
@@ -295,6 +418,7 @@ def _collect_request_result(
         windows=windows,
         status="OK",
         message="Descarga completada",
+        csv_final=csv_final,
     )
 
 
@@ -302,7 +426,11 @@ def batch_download(
     requests,
     download_path: str | Path | None = None,
     time_wait: int = DEFAULT_TIMEOUT,
-    max_years: int = 25,
+    max_years: int | None = None,
+    min_date: str | None = None,
+    max_days: int | None = None,
+    merge_chunks: bool = True,
+    keep_chunks: bool = True,
     parallel: bool = False,
     workers: int = 2,
 ) -> list[DownloadResult]:
@@ -318,9 +446,19 @@ def batch_download(
 
     if workers < 1:
         raise ValueError("workers debe ser >= 1")
+    if max_years is not None and max_years <= 0:
+        raise ValueError("max_years debe ser mayor que cero")
+    if max_days is not None and max_days <= 0:
+        raise ValueError("max_days debe ser mayor que cero")
 
     base_path = Path(download_path).absolute() if download_path else None
-    jobs, request_to_keys = _expand_to_chunks(normalized, max_years=max_years, base_path=base_path)
+    jobs, request_to_keys = _expand_to_chunks(
+        normalized,
+        max_years=max_years,
+        min_date=min_date,
+        max_days=max_days,
+        base_path=base_path,
+    )
 
     executed: dict[tuple[str, int, str, str, str, str, str], ChunkExecution] = {}
 
@@ -340,15 +478,23 @@ def batch_download(
         )
         with ProcessPoolExecutor(max_workers=len(partitions)) as pool:
             futures = [
-                pool.submit(_run_chunks_partition, partition, time_wait, max_years)
+                pool.submit(_run_chunks_partition, partition, time_wait, max_years, min_date, max_days)
                 for partition in partitions
             ]
             for fut in as_completed(futures):
                 for item in fut.result():
                     executed[item.key] = item
     else:
-        for item in _run_chunks_partition(jobs, time_wait, max_years):
+        for item in _run_chunks_partition(jobs, time_wait, max_years, min_date, max_days):
             executed[item.key] = item
+
+    for path in {job.download_path for job in jobs}:
+        still_pending = sweep_failed_cleanup_dirs(path)
+        if still_pending:
+            print(
+                f"[batch] limpieza pendiente en {path}: {len(still_pending)} carpeta(s)",
+                flush=True,
+            )
 
     results: list[DownloadResult] = []
     for req, keys in zip(normalized, request_to_keys):
@@ -362,6 +508,18 @@ def batch_download(
                 municipality=req.municipality,
                 station_code=req.station_code,
                 variable_id=req.variable_id,
+                max_years=req.max_years,
+                max_days=req.max_days,
+                min_date=req.min_date,
             )
-        results.append(_collect_request_result(effective, keys, executed))
+        results.append(
+            _collect_request_result(
+                effective,
+                keys,
+                executed,
+                min_date=min_date,
+                merge_chunks=merge_chunks,
+                keep_chunks=keep_chunks,
+            )
+        )
     return results
