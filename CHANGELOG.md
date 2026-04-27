@@ -3,6 +3,30 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.3.0] - 2026-04-27
+
+### Añadido
+- Chunking por frecuencia con límites por años o días según `variable_id`.
+- Módulo de frecuencias (`Frequency`, `FREQUENCY_LIMITS`, `infer_frequency_from_name`).
+- Consolidación de chunks con `merge_station_csvs`.
+- Catálogo maestro de estaciones en runtime (`StationMetadata`, `resolve_station_metadata`).
+- Regeneración de catálogo desde carpeta local `CNE/` con CLI `ideam-dhime-regenerate-stations`.
+- Snapshots embebidos de estaciones y ubicaciones (`stations_generated.py`, `locations_generated.py`).
+- Soporte de entrada mínima en descargas: `station_code + variable_id`.
+- Parámetro opcional `min_date` para fijar fecha mínima global o por solicitud.
+
+### Cambiado
+- `batch_download` ahora conserva resultados parciales cuando algunas ventanas no tienen datos.
+- `download_dhime_data` y flujo de sesión alineados con chunking por frecuencia y catálogo maestro.
+- Salida del catálogo oficial en `docs/guia_estaciones.xlsx` para mejor compatibilidad con Excel.
+- Mensaje de `StationNotFoundError` enriquecido con estación, variable y periodo consultado.
+
+### Corregido
+- Manejo robusto de diálogos/overlays del portal que bloqueaban interacción entre ventanas.
+- Limpieza temporal reforzada para ejecución paralela y reintentos en Windows.
+- Reintentos de borrado de archivos en `download.py` para tolerar bloqueos `WinError 32`.
+- Normalización y cruce de nombres de ubicación para reducir falsos no-match en catálogo.
+
 ## [0.2.4] - 2026-04-24
 
 ### Notes
